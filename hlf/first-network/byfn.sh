@@ -48,7 +48,7 @@ function printHelp() {
   echo "    -f <docker-compose-file> - specify which docker-compose file use (defaults to docker-compose-cli.yaml)"
   echo "    -s <dbtype> - the database backend to use: goleveldb (default) or couchdb"
   echo "    -l <language> - the chaincode language: golang (default) or node"
-  echo "    -o <consensus-type> - the consensus-type of the ordering service: solo (default), kafka, or etcdraft"
+  echo "    -o <consensus-type> - the consensus-type of the ordering service: solo (default) or kafka"
   echo "    -i <imagetag> - the tag to be used to launch the network (defaults to \"latest\")"
   echo "    -v - verbose mode"
   echo "  byfn.sh -h (print this message)"
@@ -159,24 +159,14 @@ function networkUp() {
   if [ "${IF_COUCHDB}" == "couchdb" ]; then
     if [ "$CONSENSUS_TYPE" == "kafka" ]; then
       IMAGE_TAG=$IMAGETAG docker-compose -f $COMPOSE_FILE -f $COMPOSE_FILE_KAFKA -f $COMPOSE_FILE_COUCH up -d 2>&1
-      # docker ps -a
-    elif  [ "$CONSENSUS_TYPE" == "etcdraft" ]; then
-      IMAGE_TAG=$IMAGETAG docker-compose -f $COMPOSE_FILE -f $COMPOSE_FILE_RAFT2 -f $COMPOSE_FILE_COUCH up -d 2>&1
-      docker ps -a
     else
       IMAGE_TAG=$IMAGETAG docker-compose -f $COMPOSE_FILE -f $COMPOSE_FILE_COUCH up -d 2>&1
-      docker ps -a
     fi
   else
     if [ "$CONSENSUS_TYPE" == "kafka" ]; then
       IMAGE_TAG=$IMAGETAG docker-compose -f $COMPOSE_FILE -f $COMPOSE_FILE_KAFKA up -d 2>&1
-      docker ps -a
-    elif  [ "$CONSENSUS_TYPE" == "etcdraft" ]; then
-      IMAGE_TAG=$IMAGETAG docker-compose -f $COMPOSE_FILE -f $COMPOSE_FILE_RAFT2 up -d 2>&1
-      docker ps -a
     else
       IMAGE_TAG=$IMAGETAG docker-compose -f $COMPOSE_FILE up -d 2>&1
-      docker ps -a
     fi
   fi
   if [ $? -ne 0 ]; then
@@ -186,14 +176,8 @@ function networkUp() {
 
   if [ "$CONSENSUS_TYPE" == "kafka" ]; then
     sleep 1
-    echo "Sleeping 20s to allow $CONSENSUS_TYPE cluster to complete booting"
-    sleep 30
-  fi
-
-  if [ "$CONSENSUS_TYPE" == "etcdraft" ]; then
-    sleep 1
-    echo "Sleeping 15s to allow $CONSENSUS_TYPE cluster to complete booting"
-    sleep 14
+    echo "Sleeping 10s to allow kafka cluster to complete booting"
+    sleep 9
   fi
 
   # now run the end to end script
@@ -209,7 +193,7 @@ function networkUp() {
 # and relaunch the orderer and peers with latest tag
 function upgradeNetwork() {
   if [[ "$IMAGETAG" == *"1.4"* ]] || [[ $IMAGETAG == "latest" ]]; then
-    docker inspect -f '{{.Config.Volumes}}' orderer.com | grep -q '/var/hyperledger/production/orderer'
+    docker inspect -f '{{.Config.Volumes}}' orderer.example.com | grep -q '/var/hyperledger/production/orderer'
     if [ $? -ne 0 ]; then
       echo "ERROR !!!! This network does not appear to start with fabric-samples >= v1.3.x?"
       exit 1
@@ -224,16 +208,12 @@ function upgradeNetwork() {
     if [ "${IF_COUCHDB}" == "couchdb" ]; then
       if [ "$CONSENSUS_TYPE" == "kafka" ]; then
         COMPOSE_FILES="-f $COMPOSE_FILE -f $COMPOSE_FILE_KAFKA -f $COMPOSE_FILE_COUCH"
-      elif [ "$CONSENSUS_TYPE" == "etcdraft" ]; then
-        COMPOSE_FILES="-f $COMPOSE_FILE -f $COMPOSE_FILE_RAFT2 -f $COMPOSE_FILE_COUCH"
       else
         COMPOSE_FILES="-f $COMPOSE_FILE -f $COMPOSE_FILE_COUCH"
       fi
     else
       if [ "$CONSENSUS_TYPE" == "kafka" ]; then
         COMPOSE_FILES="-f $COMPOSE_FILE -f $COMPOSE_FILE_KAFKA"
-      elif [ "$CONSENSUS_TYPE" == "etcdraft" ]; then
-        COMPOSE_FILES="-f $COMPOSE_FILE -f $COMPOSE_FILE_RAFT2"
       else
         COMPOSE_FILES="-f $COMPOSE_FILE"
       fi
@@ -244,11 +224,11 @@ function upgradeNetwork() {
     docker-compose $COMPOSE_FILES up -d --no-deps cli
 
     echo "Upgrading orderer"
-    docker-compose $COMPOSE_FILES stop orderer.com
-    docker cp -a orderer.com:/var/hyperledger/production/orderer $LEDGERS_BACKUP/orderer.com
-    docker-compose $COMPOSE_FILES up -d --no-deps orderer.com
+    docker-compose $COMPOSE_FILES stop orderer.example.com
+    docker cp -a orderer.example.com:/var/hyperledger/production/orderer $LEDGERS_BACKUP/orderer.example.com
+    docker-compose $COMPOSE_FILES up -d --no-deps orderer.example.com
 
-    for PEER in peer0.org1.com peer1.org1.com peer0.org2.com peer1.org2.com; do
+    for PEER in peer0.org1.example.com peer1.org1.example.com peer0.org2.example.com peer1.org2.example.com; do
       echo "Upgrading peer $PEER"
 
       # Stop the peer and backup its ledger
@@ -283,7 +263,7 @@ function upgradeNetwork() {
 function networkDown() {
   # stop org3 containers also in addition to org1 and org2, in case we were running sample to add org3
   # stop kafka and zookeeper containers in case we're running with kafka consensus-type
-  docker-compose -f $COMPOSE_FILE -f $COMPOSE_FILE_COUCH -f $COMPOSE_FILE_KAFKA -f $COMPOSE_FILE_RAFT2 -f $COMPOSE_FILE_ORG3 down --volumes --remove-orphans
+  docker-compose -f $COMPOSE_FILE -f $COMPOSE_FILE_COUCH -f $COMPOSE_FILE_KAFKA -f $COMPOSE_FILE_ORG3 down --volumes --remove-orphans
 
   # Don't remove the generated artifacts -- note, the ledgers are always removed
   if [ "$MODE" != "restart" ]; then
@@ -320,11 +300,11 @@ function replacePrivateKey() {
   # The next steps will replace the template's contents with the
   # actual values of the private key file names for the two CAs.
   CURRENT_DIR=$PWD
-  cd crypto-config/peerOrganizations/org1.com/ca/
+  cd crypto-config/peerOrganizations/org1.example.com/ca/
   PRIV_KEY=$(ls *_sk)
   cd "$CURRENT_DIR"
   sed $OPTS "s/CA1_PRIVATE_KEY/${PRIV_KEY}/g" docker-compose-e2e.yaml
-  cd crypto-config/peerOrganizations/org2.com/ca/
+  cd crypto-config/peerOrganizations/org2.example.com/ca/
   PRIV_KEY=$(ls *_sk)
   cd "$CURRENT_DIR"
   sed $OPTS "s/CA2_PRIVATE_KEY/${PRIV_KEY}/g" docker-compose-e2e.yaml
@@ -396,7 +376,7 @@ function generateCerts() {
 # These headers are important, as we will pass them in as arguments when we create
 # our artifacts.  This file also contains two additional specifications that are worth
 # noting.  Firstly, we specify the anchor peers for each Peer Org
-# (``peer0.org1.com`` & ``peer0.org2.com``).  Secondly, we point to
+# (``peer0.org1.example.com`` & ``peer0.org2.example.com``).  Secondly, we point to
 # the location of the MSP directory for each member, in turn allowing us to store the
 # root certificates for each Org in the orderer genesis block.  This is a critical
 # concept. Now any network entity communicating with the ordering service can have
@@ -433,8 +413,6 @@ function generateChannelArtifacts() {
     configtxgen -profile TwoOrgsOrdererGenesis -channelID byfn-sys-channel -outputBlock ./channel-artifacts/genesis.block
   elif [ "$CONSENSUS_TYPE" == "kafka" ]; then
     configtxgen -profile SampleDevModeKafka -channelID byfn-sys-channel -outputBlock ./channel-artifacts/genesis.block
-  elif [ "$CONSENSUS_TYPE" == "etcdraft" ]; then
-    configtxgen -profile SampleMultiNodeEtcdRaft -channelID byfn-sys-channel -outputBlock ./channel-artifacts/genesis.block
   else
     set +x
     echo "unrecognized CONSESUS_TYPE='$CONSENSUS_TYPE'. exiting"
@@ -499,22 +477,20 @@ CLI_DELAY=3
 # channel name defaults to "mychannel"
 CHANNEL_NAME="mychannel"
 # use this as the default docker-compose yaml definition
-COMPOSE_FILE=docker-compose-e2e.yaml
+COMPOSE_FILE=docker-compose-cli.yaml
 #
 COMPOSE_FILE_COUCH=docker-compose-couch.yaml
 # org3 docker compose file
 COMPOSE_FILE_ORG3=docker-compose-org3.yaml
 # kafka and zookeeper compose file
 COMPOSE_FILE_KAFKA=docker-compose-kafka.yaml
-# two additional etcd/raft orderers
-COMPOSE_FILE_RAFT2=docker-compose-etcdraft2.yaml
 #
 # use golang as the default language for chaincode
 LANGUAGE=golang
 # default image tag
 IMAGETAG="latest"
 # default consensus type
-CONSENSUS_TYPE="kafka"
+CONSENSUS_TYPE="solo"
 # Parse commandline args
 if [ "$1" = "-m" ]; then # supports old usage, muscle memory is powerful!
   shift
@@ -564,7 +540,7 @@ while getopts "h?c:t:d:f:s:l:i:o:v" opt; do
   i)
     IMAGETAG=$(go env GOARCH)"-"$OPTARG
     ;;
-  o)
+   o)
     CONSENSUS_TYPE=$OPTARG
     ;;
   v)
